@@ -9,7 +9,7 @@ typealias BonusesStorage = [MonthKey: BonusStorageItem]
 
 
 
-// data base
+// MARK: DataBase
 var workDaysByMonth: WorkDaysStorage = [:]
 var bonusesByMonth: BonusesStorage = [:]
 
@@ -17,10 +17,7 @@ var bonusesByMonth: BonusesStorage = [:]
 
 
 
-
-// хранение дней
-
-// создать ключ месяца для хранения по пакам
+// MARK: Month key
 func makeMonthKey(year y: Int, month m: Int) -> MonthKey {
     if m < 10 {
         return "\(y)-0\(m)"
@@ -31,7 +28,7 @@ func makeMonthKey(year y: Int, month m: Int) -> MonthKey {
 
 
 
-// создает массив с новыми днями (обновление данных)
+// MARK: UpdateDays
 func updateDays(forYear y: Int, forMonth m: Int, daysData d: [Int]) -> ([WorkDay]) {
     var newMonthData : [WorkDay] = []
     for dayValue in d {
@@ -41,8 +38,7 @@ func updateDays(forYear y: Int, forMonth m: Int, daysData d: [Int]) -> ([WorkDay
 }
 
 
-
-// обновляет дни в общей базе данных дней и проверяет на дубликаты
+// TODO: Add sorting to function
 func addToDataBase(monthKey key: MonthKey, setFromUpdateDays monthData:[WorkDay], setDataBaseWorkDays dataBase: inout [MonthKey: [WorkDay]]) -> () {
     var currentMonthDays : [WorkDay] = dataBase[key] ?? []
     var addCount = 0
@@ -70,7 +66,6 @@ func addToDataBase(monthKey key: MonthKey, setFromUpdateDays monthData:[WorkDay]
 
     
     
-// обертка
 func updateDateForHalfMonth (year y: Int, month m: Int, addDays d: [Int], selectDataBase: inout WorkDaysStorage) {
     let month = updateDays(forYear: y, forMonth: m, daysData: d)
     let monthKey = makeMonthKey(year: y, month: m)
@@ -82,9 +77,7 @@ func updateDateForHalfMonth (year y: Int, month m: Int, addDays d: [Int], select
 
 
 
-// хранение бонусов
-
-// создает словарь бонусов за определенный ренж
+// MARK: Update Bonuses
 func updateBonus (days d: [Int], bonuses b: [Int]) -> BonusStorageItem {
     var newBonusData : BonusStorageItem = [:]
     let set = Set(d)
@@ -103,7 +96,6 @@ func updateBonus (days d: [Int], bonuses b: [Int]) -> BonusStorageItem {
 
 
 
-// добавляет созданный словарь в базу данных
 func addBonusesToDataBase (monthKey key: MonthKey, setFromUpdateBonus newBonuses: BonusStorageItem, setBonusesStorage bonusData: inout BonusesStorage, overRide ovr: Bool) -> () {
     var monthBonuses : BonusStorageItem = bonusData[key] ?? [:]
     if ovr {
@@ -126,7 +118,6 @@ func addBonusesToDataBase (monthKey key: MonthKey, setFromUpdateBonus newBonuses
 
 
 
-// обертка
 func updateBonusesForRange (overRide ovr: Bool, year y: Int, month m: Int, addDays days: [Int], addBonuses bonuses: [Int], setBonusesStorage bonusData: inout BonusesStorage) -> () {
     let month = updateBonus(days: days, bonuses: bonuses)
     let monthKey = makeMonthKey(year: y, month: m)
@@ -138,7 +129,7 @@ func updateBonusesForRange (overRide ovr: Bool, year y: Int, month m: Int, addDa
 
 
 
-// удаление данных (1. Выбранные дни)
+// MARK: Remove days
 func removeSelectDays (selectDaysToRemove rDays: [Int], year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> () {
     let removeSet : Set<Int> = Set(rDays)
     let monthKey = makeMonthKey(year: y, month: m)
@@ -181,7 +172,6 @@ func removeSelectDays (selectDaysToRemove rDays: [Int], year y: Int, month m: In
 
 
 
-// удаление данных (весь месяц)
 func removeAllMonth (year y: Int, month m: Int, selectDateBase dataBase: inout WorkDaysStorage) -> () {
     let monthKey = makeMonthKey(year: y, month: m)
     if dataBase[monthKey] != nil {
@@ -194,7 +184,6 @@ func removeAllMonth (year y: Int, month m: Int, selectDateBase dataBase: inout W
 
 
 
-// удаление данных (диапазон)
 func removeRangeDays (selectDaysToRemove rDays: ClosedRange<Int>, year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> () {
     let array = Array(rDays)
     removeSelectDays(selectDaysToRemove: array, year: y, month: m, selectDateBase: &dateBase)
@@ -205,8 +194,7 @@ func removeRangeDays (selectDaysToRemove rDays: ClosedRange<Int>, year y: Int, m
 
 
 
-
-// фильтрация дней по диапазону
+// MARK: Filter days
 func filterDaysRange (monthKey key: MonthKey, rangeDays d:ClosedRange<Int>, selectDateBase dateBase: WorkDaysStorage) -> [Int] {
     let monthDays = dateBase[key] ?? []
     var outputWorkDays :[Int] = []
@@ -229,7 +217,8 @@ func filterDaysRange (monthKey key: MonthKey, rangeDays d:ClosedRange<Int>, sele
 
 
 
-// подсчитать мой бонус за период
+
+// MARK: Calculate
 func calcMyShiftStats (
     filterDays: [Int],
     monthBonuses: [Int: Int]
@@ -261,7 +250,7 @@ func calcMyShiftStats (
 }
     
     
-// подсчитать средний бонус за период
+
 func calcAvgBonusForRange (
     monthBonuses: [Int:Int],
     range: ClosedRange<Int>
@@ -284,13 +273,9 @@ func calcAvgBonusForRange (
     }
     return (allBonuses,avgBonuses,allBonusesCount)
 }
-    
 
 
 
-
-
-// функция калькулятор
 func SalaryCalculateRange (selectDaysRange range: ClosedRange<Int>, monthKey key: MonthKey, funcFilterDays filterDays: [Int], setFixedPay fixedPay: Int = 1000, selectBonusDateBase bonusDb: BonusesStorage) -> (realSalary: Int, guardSalary: Int, predictableSalary: Int, noDataCount: Int, workedCount: Int, plannedCount: Int, myBonuses: Int, myAvgBonuses: Int, avgBonuses: Int, noDataDays: [Int], workedDays: [Int] ) {
     
     let monthBonuses : [Int:Int] = bonusDb[key] ?? [:]
@@ -311,7 +296,7 @@ func SalaryCalculateRange (selectDaysRange range: ClosedRange<Int>, monthKey key
 }
 
 
-// красивый табличный вывод
+// MARK: TableReport
 func printReport (
     monthKey: MonthKey,
     range: ClosedRange<Int>,
@@ -395,8 +380,8 @@ updateBonusesForRange(overRide: true, year: 2026, month: 1, addDays: [2,3,4,5,6,
 updateBonusesForRange(overRide: false, year: 2026, month: 1, addDays: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], addBonuses: [500,1000,500,200,1400,350,900,1050,1000,350,200,100,150,0,550,400], setBonusesStorage: &bonusesByMonth)
 //print("\(workDaysByMonth) \n\n\(bonusesByMonth)")
 //bonusesByMonth
-
-salaryHalfMonth(year: 2026, month: 1, setPeriod: 16...31, workDaysDB: workDaysByMonth, bonusDB: bonusesByMonth)
+updateBonusesForRange(overRide: false, year: 2026, month: 2, addDays: [10,11,12,13,14], addBonuses: [150,250,200,250,950], setBonusesStorage: &bonusesByMonth)
+salaryHalfMonth(year: 2026, month: 2, setPeriod: 1...15, workDaysDB: workDaysByMonth, bonusDB: bonusesByMonth)
 
 
 
