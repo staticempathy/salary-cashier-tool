@@ -7,7 +7,29 @@ typealias Bonus = Int
 typealias BonusStorageItem = [Day: Bonus]
 typealias BonusesStorage = [MonthKey: BonusStorageItem]
 
+typealias RemoveDaysReport = (
+    monthKey: MonthKey,
+    requested: Int,
+    removed: Int,
+    notFoundDays: [Int],
+    monthRemoved: Bool
+)
 
+typealias SalaryReport = (
+    realSalary: Int,
+    guardSalary: Int,
+    predictableSalary: Int,
+    noDataCount: Int,
+    workedCount: Int,
+    plannedCount: Int,
+    myBonuses: Int,
+    myAvgBonuses: Int,
+    avgBonuses: Int,
+    noDataDays: [Int],
+    workedDays: [Int],
+    monthKey: MonthKey,
+    range: ClosedRange<Int>
+)
 
 // MARK: DataBase
 var workDaysByMonth: WorkDaysStorage = [:]
@@ -38,25 +60,19 @@ func updateDays(forYear y: Int, forMonth m: Int, daysData d: [Int]) -> ([WorkDay
 }
 
 
-// TODO: Add sorting to function
+
 func addToDataBase(monthKey key: MonthKey, setFromUpdateDays monthData:[WorkDay], setDataBaseWorkDays dataBase: inout [MonthKey: [WorkDay]]) -> () {
     var currentMonthDays : [WorkDay] = dataBase[key] ?? []
     var addCount = 0
     for value in monthData {
-        var isDublicate = false
-        for exiting in currentMonthDays {
-            if value.day == exiting.day && value.month == exiting.month && value.year == exiting.year {
-                isDublicate = true
-                print("Warning day \(value.day) already exist!")
-                break
-            }
-        }
-        if !isDublicate {
+        let isDublicate = currentMonthDays.contains { $0 == value }
+            if !isDublicate {
             addCount += 1
             currentMonthDays.append(value)
         }
     }
-    dataBase[key] = currentMonthDays
+
+    dataBase[key] = currentMonthDays.sorted { $0.day < $1.day }
     if addCount > 0 {
         print("Add \(addCount)/\(monthData.count) days succes!")
     } else {
@@ -78,18 +94,22 @@ func updateDateForHalfMonth (year y: Int, month m: Int, addDays d: [Int], select
 
 
 // MARK: Update Bonuses
-func updateBonus (days d: [Int], bonuses b: [Int]) -> BonusStorageItem {
+func updateBonus (days d: [Int], bonuses b: [Int]) -> BonusStorageItem? {
     var newBonusData : BonusStorageItem = [:]
     let set = Set(d)
-    if d.count != b.count {
+    
+    guard d.count == b.count else {
         print("Error! days.count != bonuses.count")
-        return newBonusData
-    } else if set.count != d.count {
-        print("Error! Dublicate detected!")
-        return newBonusData
+        return nil
     }
-    for index in 0..<b.count {
-        newBonusData[d[index]] = b[index]
+    
+    guard set.count == d.count else {
+        print("Error! Dublicate detected!")
+        return nil
+    }
+   
+    for (day,bonus) in zip(d, b) {
+        newBonusData[day] = bonus
     }
     return newBonusData
 }
@@ -117,76 +137,85 @@ func addBonusesToDataBase (monthKey key: MonthKey, setFromUpdateBonus newBonuses
 }
 
 
-
 func updateBonusesForRange (overRide ovr: Bool, year y: Int, month m: Int, addDays days: [Int], addBonuses bonuses: [Int], setBonusesStorage bonusData: inout BonusesStorage) -> () {
-    let month = updateBonus(days: days, bonuses: bonuses)
+    
     let monthKey = makeMonthKey(year: y, month: m)
-    addBonusesToDataBase(monthKey: monthKey, setFromUpdateBonus: month, setBonusesStorage: &bonusData, overRide: ovr)
+    if let month = updateBonus(days: days, bonuses: bonuses) {
+        addBonusesToDataBase(monthKey: monthKey, setFromUpdateBonus: month, setBonusesStorage: &bonusData, overRide: ovr)
+    }
 }
 
 
 
+
+
+
+// MARK: printRemoveReport
+func printRemoveReport (_ report: RemoveDaysReport) -> Void {
+    print("======= REMOVE REPORT =======")
+     print("Month: \(report.monthKey)")
+     print("Requested: \(report.requested)")
+     print("Removed: \(report.removed)")
+     
+     if !report.notFoundDays.isEmpty {
+         print("Not found: \(report.notFoundDays)")
+     }
+     
+     if report.monthRemoved {
+         print("Month folder removed (empty)")
+     }
+     
+     print("=============================")
+}
 
 
 
 // MARK: Remove days
-func removeSelectDays (selectDaysToRemove rDays: [Int], year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> () {
+func removeSelectDays (selectDaysToRemove rDays: [Int], year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> (RemoveDaysReport) {
     let removeSet : Set<Int> = Set(rDays)
     let monthKey = makeMonthKey(year: y, month: m)
-    
     var updatedData : [WorkDay] = []
-    var deletedItems = 0
-    var notFoundedSet : Set<Int> = Set(rDays)
     
-    if let tempDateBase = dateBase[monthKey] {
-        for i in 0..<tempDateBase.count {
-            if !removeSet.contains(tempDateBase[i].day) {
-                updatedData.append(tempDateBase[i])
-            } else {
-                deletedItems += 1
-                notFoundedSet.remove(tempDateBase[i].day)
-            }
-        }
-    } else {
-        print("No data for this month")
-        return
+    
+    guard let monthDays = dateBase[monthKey] else {
+        return (monthKey,removeSet.count,0,Array(removeSet),false)
     }
+    
+    let monthDaysSet = Set(monthDays.map {$0.day})
+    let foundToRemove = Set(removeSet.filter {monthDaysSet.contains($0)})
+    let notFound = Set(removeSet.filter {!monthDaysSet.contains($0)})
+    
+    if foundToRemove.isEmpty {
+        return (monthKey,removeSet.count,0,Array(notFound),false)
+    }
+    updatedData = monthDays.filter {!foundToRemove.contains($0.day)}
+    
     if updatedData.isEmpty {
-        print("Now month is emtpy, removing folder... \(deletedItems) / \(removeSet.count) items have been removed ")
         dateBase[monthKey] = nil
-        return
+        return (monthKey,removeSet.count,foundToRemove.count,Array(notFound),true)
     } else {
         dateBase[monthKey] = updatedData
-        switch notFoundedSet.count {
-            case 0:
-                print("Success! \(deletedItems) / \(removeSet.count) items have been removed")
-            case removeSet.count:
-                print("Your data not found, \(deletedItems) / \(removeSet.count) items have been removed")
-            default:
-            print("Warning! \(deletedItems) / \(removeSet.count) items have been removed, not founded: \(notFoundedSet)")
-
-        }
+        return (monthKey,removeSet.count,foundToRemove.count,Array(notFound),false)
     }
-    
 }
 
 
 
-func removeAllMonth (year y: Int, month m: Int, selectDateBase dataBase: inout WorkDaysStorage) -> () {
+func removeAllMonth (year y: Int, month m: Int, selectDateBase dataBase: inout WorkDaysStorage) -> (RemoveDaysReport) {
     let monthKey = makeMonthKey(year: y, month: m)
-    if dataBase[monthKey] != nil {
+    if let tempBase = dataBase[monthKey] {
         dataBase[monthKey] = nil
-        print("\(monthKey) has been removed")
+        return (monthKey,tempBase.count, tempBase.count, [], true)
     } else {
-        print("\(monthKey) not Found!")
+        return (monthKey,0,0,[],false)
     }
 }
 
 
 
-func removeRangeDays (selectDaysToRemove rDays: ClosedRange<Int>, year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> () {
+func removeRangeDays (selectDaysToRemove rDays: ClosedRange<Int>, year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> (RemoveDaysReport) {
     let array = Array(rDays)
-    removeSelectDays(selectDaysToRemove: array, year: y, month: m, selectDateBase: &dateBase)
+    return removeSelectDays(selectDaysToRemove: array, year: y, month: m, selectDateBase: &dateBase)
 }
 
 
@@ -197,20 +226,11 @@ func removeRangeDays (selectDaysToRemove rDays: ClosedRange<Int>, year y: Int, m
 // MARK: Filter days
 func filterDaysRange (monthKey key: MonthKey, rangeDays d:ClosedRange<Int>, selectDateBase dateBase: WorkDaysStorage) -> [Int] {
     let monthDays = dateBase[key] ?? []
-    var outputWorkDays :[Int] = []
-    
-    if !monthDays.isEmpty {
-        for workDay in monthDays {
-            if d.contains(workDay.day) {
-                outputWorkDays.append(workDay.day)
-            }
-            }
-        } else {
-            print("No data for this month")
-            return []
-    }
-    
-    return outputWorkDays.sorted()
+    var outputWorkDays : [Int] = monthDays
+        .map{ $0.day }
+        .filter { d.contains($0) }
+        .sorted{ $0 < $1 }
+    return outputWorkDays
 }
 
 
@@ -248,7 +268,8 @@ func calcMyShiftStats (
     
     return (myBonuses,workedCount,noDataCount,workedDays,noDataDays)
 }
-    
+
+
     
 
 func calcAvgBonusForRange (
@@ -259,24 +280,16 @@ func calcAvgBonusForRange (
     avgBonuses:Int,
     allBonusesCount: Int
 ) {
-    var allBonuses = 0
-    var avgBonuses = 0
-    var allBonusesCount = 0
-    for (day,bonus) in monthBonuses {
-        if range.contains(day) {
-            allBonuses += bonus
-            allBonusesCount += 1
-        }
-    }
-    if allBonusesCount > 0 {
-        avgBonuses = allBonuses / allBonusesCount
-    }
+    let filtered = monthBonuses.filter {range.contains($0.key)}
+    let allBonusesCount = filtered.count
+    let allBonuses = filtered.reduce(0) {$0 + $1.value}
+    let avgBonuses = allBonusesCount > 0 ? allBonuses / allBonusesCount : 0
+    
     return (allBonuses,avgBonuses,allBonusesCount)
 }
 
-
-
-func SalaryCalculateRange (selectDaysRange range: ClosedRange<Int>, monthKey key: MonthKey, funcFilterDays filterDays: [Int], setFixedPay fixedPay: Int = 1000, selectBonusDateBase bonusDb: BonusesStorage) -> (realSalary: Int, guardSalary: Int, predictableSalary: Int, noDataCount: Int, workedCount: Int, plannedCount: Int, myBonuses: Int, myAvgBonuses: Int, avgBonuses: Int, noDataDays: [Int], workedDays: [Int] ) {
+// FIXME: IF BONUS = [:] NEED ADD ALERT!
+func SalaryCalculateRange (selectDaysRange range: ClosedRange<Int>, monthKey key: MonthKey, funcFilterDays filterDays: [Int], setFixedPay fixedPay: Int = 1000, selectBonusDateBase bonusDb: BonusesStorage) -> SalaryReport {
     
     let monthBonuses : [Int:Int] = bonusDb[key] ?? [:]
     
@@ -292,30 +305,16 @@ func SalaryCalculateRange (selectDaysRange range: ClosedRange<Int>, monthKey key
         myAvgBonus = (stats.myBonuses / stats.workedCount)
     }
     var predictableSalary = (fixedPay * plannedCount) + (myAvgBonus * stats.noDataCount) + stats.myBonuses
-    return (realSalaryToday,guardSalary,predictableSalary,stats.noDataCount,stats.workedCount,plannedCount,stats.myBonuses,myAvgBonus,avgStats.avgBonuses,stats.noDataDays, stats.workedDays)
+    return (realSalaryToday,guardSalary,predictableSalary,stats.noDataCount,stats.workedCount,plannedCount,stats.myBonuses,myAvgBonus,avgStats.avgBonuses,stats.noDataDays, stats.workedDays,key,range)
 }
 
 
 // MARK: TableReport
-func printReport (
-    monthKey: MonthKey,
-    range: ClosedRange<Int>,
-    report: (realSalary: Int,
-             guardSalary: Int,
-             predictableSalary: Int,
-             noDataCount: Int,
-             workedCount: Int,
-             plannedCount: Int,
-             myBonuses: Int,
-             myAvgBonuses: Int,
-             avgBonuses: Int,
-             noDataDays: [Int],
-             workedDays: [Int])
-) -> () {
+func printReport (report: (SalaryReport) ) -> () {
     print("""
         ======== SALARY REPORT ========
-        Дата: \(monthKey)
-        Дни:   \(range)
+        Дата: \(report.monthKey)
+        Дни:   \(report.range)
         -------------------------------
         Кол-во смен:            \(report.plannedCount)
         Отработано:             \(report.workedCount)
@@ -345,24 +344,11 @@ func salaryHalfMonth (
     setPeriod range: ClosedRange<Int>,
     workDaysDB: WorkDaysStorage,
     bonusDB: BonusesStorage
-) -> (
-    realSalary: Int,
-    guardSalary: Int,
-    predictableSalary: Int,
-    noDataCount: Int,
-    workedCount: Int,
-    plannedCount: Int,
-    myBonuses: Int,
-    myAvgBonuses: Int,
-    avgBonuses: Int,
-    noDataDays: [Int],
-    workedDays: [Int]
-) {
+) -> (SalaryReport) {
     let monthKey = makeMonthKey(year: y, month: m)
     let filterDays = filterDaysRange(monthKey: monthKey, rangeDays: range, selectDateBase: workDaysDB)
     let allStats = SalaryCalculateRange(selectDaysRange: range, monthKey: monthKey, funcFilterDays: filterDays, selectBonusDateBase: bonusDB)
-    
-    printReport(monthKey: monthKey, range: range, report: allStats)
+
     return(allStats)
     
 }
@@ -380,9 +366,6 @@ updateBonusesForRange(overRide: true, year: 2026, month: 1, addDays: [2,3,4,5,6,
 updateBonusesForRange(overRide: false, year: 2026, month: 1, addDays: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], addBonuses: [500,1000,500,200,1400,350,900,1050,1000,350,200,100,150,0,550,400], setBonusesStorage: &bonusesByMonth)
 //print("\(workDaysByMonth) \n\n\(bonusesByMonth)")
 //bonusesByMonth
-updateBonusesForRange(overRide: false, year: 2026, month: 2, addDays: [10,11,12,13,14], addBonuses: [150,250,200,250,950], setBonusesStorage: &bonusesByMonth)
-salaryHalfMonth(year: 2026, month: 2, setPeriod: 1...15, workDaysDB: workDaysByMonth, bonusDB: bonusesByMonth)
-
-
-
-
+updateBonusesForRange(overRide: false, year: 2026, month: 2, addDays: [10,11,12,13,14,15], addBonuses: [150,250,200,250,950,450], setBonusesStorage: &bonusesByMonth)
+let report = salaryHalfMonth(year: 2026, month: 2, setPeriod: 1...15, workDaysDB: workDaysByMonth, bonusDB: bonusesByMonth)
+printReport(report: report)
