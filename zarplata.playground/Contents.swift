@@ -7,6 +7,38 @@ typealias Bonus = Int
 typealias BonusStorageItem = [Day: Bonus]
 typealias BonusesStorage = [MonthKey: BonusStorageItem]
 
+
+
+
+enum AppReport {
+    case addDays(AddDaysReport)
+//    case RemoveDaysReport(RemoveDaysReport)
+//    case SalaryReport(SalaryReport)
+    
+    var logText: String {
+        switch self {
+        case .addDays(let r) :
+            return r.logText
+        }
+    }
+}
+
+
+
+enum SalaryAppError : Error {
+    
+    case emptyInput
+    
+    var logText : String {
+        switch self {
+        case .emptyInput:
+            return "❌ Empty input"
+        }
+    }
+}
+
+
+
 typealias RemoveDaysReport = (
     monthKey: MonthKey,
     requested: Int,
@@ -14,6 +46,7 @@ typealias RemoveDaysReport = (
     notFoundDays: [Int],
     monthRemoved: Bool
 )
+
 
 typealias SalaryReport = (
     realSalary: Int,
@@ -30,6 +63,30 @@ typealias SalaryReport = (
     monthKey: MonthKey,
     range: ClosedRange<Int>
 )
+
+struct AddDaysReport {
+    let monthKey: MonthKey
+    let addCount: Int
+    let dublicates: [Int]
+    let operationStatus: OperationStatus
+    
+    var logText: String {
+        var text = "✅ AddDays | \(monthKey)\nAdded: \(addCount)"
+        if operationStatus == .warning {
+            text += "\n⚠️ Duplicates ignored: \(dublicates.sorted())"
+        }
+    return text
+    }
+}
+
+
+
+
+enum OperationStatus {
+    case success
+    case warning
+}
+
 
 // MARK: DataBase
 var workDaysByMonth: WorkDaysStorage = [:]
@@ -60,27 +117,34 @@ func updateDays(forYear y: Int, forMonth m: Int, daysData d: [Int]) -> ([WorkDay
 }
 
 
+// TODO: Add Report
 
-func addToDataBase(monthKey key: MonthKey, setFromUpdateDays monthData:[WorkDay], setDataBaseWorkDays dataBase: inout [MonthKey: [WorkDay]]) -> () {
+func addToDataBase(monthKey key: MonthKey, setFromUpdateDays monthData:[WorkDay], setDataBaseWorkDays dataBase: inout [MonthKey: [WorkDay]]) -> Result<AppReport,SalaryAppError> {
+    
+    guard !monthData.isEmpty else {
+        return .failure(.emptyInput)
+    }
+    
     var currentMonthDays : [WorkDay] = dataBase[key] ?? []
     var addCount = 0
+    var dublicateDays : [Int] = []
+    
     for value in monthData {
         let isDublicate = currentMonthDays.contains { $0 == value }
-            if !isDublicate {
+        if isDublicate {
+            dublicateDays.append(value.day)
+        } else {
             addCount += 1
             currentMonthDays.append(value)
         }
     }
-
+    let status : OperationStatus = (addCount > 0) || (dublicateDays.isEmpty) ? .success : .warning
+    let report = AddDaysReport(monthKey: key, addCount: addCount, dublicates: dublicateDays, operationStatus: status)
     dataBase[key] = currentMonthDays.sorted { $0.day < $1.day }
-    if addCount > 0 {
-        print("Add \(addCount)/\(monthData.count) days succes!")
-    } else {
-        print("\(addCount) days not add!")
-    }
+    return .success(.addDays(report))
+
 }
 
-    
     
 func updateDateForHalfMonth (year y: Int, month m: Int, addDays d: [Int], selectDataBase: inout WorkDaysStorage) {
     let month = updateDays(forYear: y, forMonth: m, daysData: d)
@@ -94,6 +158,7 @@ func updateDateForHalfMonth (year y: Int, month m: Int, addDays d: [Int], select
 
 
 // MARK: Update Bonuses
+// TODO: UpdateBonuses Report
 func updateBonus (days d: [Int], bonuses b: [Int]) -> BonusStorageItem? {
     var newBonusData : BonusStorageItem = [:]
     let set = Set(d)
@@ -114,34 +179,36 @@ func updateBonus (days d: [Int], bonuses b: [Int]) -> BonusStorageItem? {
     return newBonusData
 }
 
+// MARK: Update Bonuses Mode
+enum UpdateMode {
+    case override
+    case onlyAdd
+}
 
-
-func addBonusesToDataBase (monthKey key: MonthKey, setFromUpdateBonus newBonuses: BonusStorageItem, setBonusesStorage bonusData: inout BonusesStorage, overRide ovr: Bool) -> () {
+func addBonusesToDataBase (monthKey key: MonthKey, setFromUpdateBonus newBonuses: BonusStorageItem, setBonusesStorage bonusData: inout BonusesStorage, updateMode mode: UpdateMode) -> () {
     var monthBonuses : BonusStorageItem = bonusData[key] ?? [:]
-    if ovr {
+    
+    switch mode {
+    case .override :
         for (day, bonus) in newBonuses {
             monthBonuses[day] = bonus
         }
-    } else {
-        for (day, bonus) in newBonuses {
-            if monthBonuses[day] == nil {
+    case .onlyAdd :
+        for (day, bonus) in newBonuses where monthBonuses[day] == nil {
                 monthBonuses[day] = bonus
-            } else {
-                continue
-            }
         }
-        
     }
+    
     bonusData[key] = monthBonuses
     print("Update bonuses succes!")
 }
 
 
-func updateBonusesForRange (overRide ovr: Bool, year y: Int, month m: Int, addDays days: [Int], addBonuses bonuses: [Int], setBonusesStorage bonusData: inout BonusesStorage) -> () {
+func updateBonusesForRange (updateMode mode: UpdateMode, year y: Int, month m: Int, addDays days: [Int], addBonuses bonuses: [Int], setBonusesStorage bonusData: inout BonusesStorage) -> () {
     
     let monthKey = makeMonthKey(year: y, month: m)
     if let month = updateBonus(days: days, bonuses: bonuses) {
-        addBonusesToDataBase(monthKey: monthKey, setFromUpdateBonus: month, setBonusesStorage: &bonusData, overRide: ovr)
+        addBonusesToDataBase(monthKey: monthKey, setFromUpdateBonus: month, setBonusesStorage: &bonusData, updateMode: mode)
     }
 }
 
@@ -354,18 +421,27 @@ func salaryHalfMonth (
 }
 
 
-
+// helper
+func printResult (_ result: Result<AppReport, SalaryAppError>) {
+    switch result {
+    case .success(let report):
+        print(report.logText)
+    case .failure(let error):
+        print(error.logText)
+    }
+}
 
 
 
 
 updateDateForHalfMonth(year: 2026, month: 01, addDays: [4,5,6,9,10,11,14,15,19,20,21,24,25,26,29,30,31], selectDataBase: &workDaysByMonth)
 updateDateForHalfMonth(year: 2026, month: 02, addDays: [1,2,3,6,7,9,12,13,15], selectDataBase: &workDaysByMonth)
-updateBonusesForRange(overRide: true, year: 2026, month: 2, addDays: [1,2,3,4,5,6,7,8,9], addBonuses: [450,0,250,100,450,600,1200,600,0], setBonusesStorage: &bonusesByMonth)
-updateBonusesForRange(overRide: true, year: 2026, month: 1, addDays: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], addBonuses: [400,200,150,150,100,150,100,300,250,350,250,400,300,250], setBonusesStorage: &bonusesByMonth)
-updateBonusesForRange(overRide: false, year: 2026, month: 1, addDays: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], addBonuses: [500,1000,500,200,1400,350,900,1050,1000,350,200,100,150,0,550,400], setBonusesStorage: &bonusesByMonth)
+updateBonusesForRange(updateMode: .override, year: 2026, month: 2, addDays: [1,2,3,4,5,6,7,8,9], addBonuses: [450,0,250,100,450,600,1200,600,0], setBonusesStorage: &bonusesByMonth)
+updateBonusesForRange(updateMode: .override, year: 2026, month: 1, addDays: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], addBonuses: [400,200,150,150,100,150,100,300,250,350,250,400,300,250], setBonusesStorage: &bonusesByMonth)
+updateBonusesForRange(updateMode: .override, year: 2026, month: 1, addDays: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], addBonuses: [500,1000,500,200,1400,350,900,1050,1000,350,200,100,150,0,550,400], setBonusesStorage: &bonusesByMonth)
 //print("\(workDaysByMonth) \n\n\(bonusesByMonth)")
 //bonusesByMonth
-updateBonusesForRange(overRide: false, year: 2026, month: 2, addDays: [10,11,12,13,14,15], addBonuses: [150,250,200,250,950,450], setBonusesStorage: &bonusesByMonth)
+updateBonusesForRange(updateMode: .onlyAdd, year: 2026, month: 2, addDays: [10,11,12,13,14,15], addBonuses: [150,250,200,250,950,450], setBonusesStorage: &bonusesByMonth)
 let report = salaryHalfMonth(year: 2026, month: 2, setPeriod: 1...15, workDaysDB: workDaysByMonth, bonusDB: bonusesByMonth)
 printReport(report: report)
+ 
