@@ -1,17 +1,17 @@
-typealias MonthKey = String
-typealias WorkDay = (day: Int, month: Int, year: Int)
-typealias WorkDaysStorage = [MonthKey: [WorkDay]]
 
 typealias Day = Int
-typealias Bonus = Int
-typealias BonusStorageItem = [Day: Bonus]
-typealias BonusesStorage = [MonthKey: BonusStorageItem]
+typealias Month = Int
+typealias Year = Int
+typealias Bonus = Int?
+typealias WorkDaysStorage = [WorkDay]
+
 
 
 
 
 enum AppReport {
     case addDays(AddDaysReport)
+    case createMonth(CreateMonthReport)
     case removeDays(RemoveDaysReport)
     case addBonus(UpdateBonusReport)
     case salary(SalaryReport)
@@ -26,19 +26,23 @@ enum AppReport {
             return r.logText
         case .salary(let r):
             return r.logText
+        case .createMonth(let r) :
+            return r.logText
         }
     }
 }
 
 
 
-enum AppErorr : Error {
+enum AppError : Error {
     case emptyInput
     case nothingToRemove
     case emptyMonthForKey
-    case missmutchBonusesAndDays
-    case dublicateDetacted
+    case mismatchBonusesAndDays
+    case duplicateDetected
     case noDaysForRange
+    case emptyMonth
+    case wrongInput
     
     var logText : String {
         switch self {
@@ -48,38 +52,59 @@ enum AppErorr : Error {
             return "❌ Error: Nothing to remove"
         case .emptyMonthForKey:
             return "❌ Error: Month not Found"
-        case .dublicateDetacted:
+        case .duplicateDetected:
             return "❌ Error: Days dublicate detected"
-        case .missmutchBonusesAndDays:
+        case .mismatchBonusesAndDays:
             return "❌ Error: Days count != Bonuses count"
         case .noDaysForRange:
             return "❌ No found days for this Range"
+        case .emptyMonth:
+            return "❌ Month is empty"
+        case .wrongInput:
+            return "❌ Wrong input"
+        }
+    }
+}
+
+enum UpdateMode {
+    case override
+    case onlyAdd
+    
+    var title : String {
+        switch self {
+        case .override: return "OverRide"
+        case .onlyAdd: return "Only Add"
         }
     }
 }
 
 
 
-struct RemoveDaysReport {
-    let monthKey: MonthKey
-    let requested: Int
-    let removed: Int
-    let notFoundDays: [Int]
-    let monthRemoved: Bool
-    let operationStatus: OperationStatus
+struct CreateMonthReport {
+    let daysCount : Int
+    let month : Int
+    let year : Int
     
     var logText : String {
-        var text = "✅ Remove days | \(monthKey)\nRemoved: \(removed)/\(requested) days!"
-        if operationStatus == .warning  {
-            text += "\n⚠️ Not found days: \(notFoundDays.sorted())"
-        }
-        
-        if monthRemoved {
-            text += "\n🗑️ Now month is Empty. Removing Folder..."
-        }
+        var text = "✅ Created month \(month)/\(year) with \(daysCount) days"
         return text
     }
 }
+
+struct RemoveDaysReport {
+    let removedCount: Int
+    let operationStatus : OperationStatus
+    
+    var logText : String {
+        var text = "✅ Remove \(removedCount) days"
+        
+        if operationStatus == .warning {
+            text += "Warning. Nothing to remove"
+        }
+        return text
+        }
+
+    }
 
 
 
@@ -87,23 +112,28 @@ struct SalaryReport {
     let realSalary: Int
     let guardSalary: Int
     let predictableSalary: Int
-    let noDataCount: Int
-    let workedCount: Int
     let plannedCount: Int
     let myBonuses: Int
     let myAvgBonuses: Int
     let avgBonuses: Int
     let noDataDays: [Int]
     let workedDays: [Int]
-    let monthKey: MonthKey
-    let range: ClosedRange<Int>
+    let range: [Int]
     let operationStatus: OperationStatus
     let warning : SalaryWarning?
+    
+    var workedCount : Int {
+        return workedDays.count
+    }
+    
+    var noDataCount : Int {
+        return noDataDays.count
+    }
     
     var logText : String {
         var text = """
         ======== SALARY REPORT ========
-        Дата: \(monthKey)
+        Дата: 
         Дни:   \(range)
         -------------------------------
         Кол-во смен:            \(plannedCount)
@@ -137,37 +167,66 @@ struct SalaryReport {
 }
 
 struct AddDaysReport {
-    let monthKey: MonthKey
     let requested: Int
     let addCount: Int
-    let dublicates: [Int]
+    let problems: [Int]
     let operationStatus: OperationStatus
+    let myShifts : [Int]
     
     var logText: String {
-        var text = "✅ AddDays | \(monthKey)\nAdded: \(addCount)/\(requested)"
+        var text = "✅ AddDays | \nAdded: \(addCount)/\(requested)"
         if operationStatus == .warning {
-            text += "\n⚠️ Duplicates ignored: \(dublicates.sorted())"
+            text += "\n⚠️ Duplicates ignored: \(problems.sorted())"
         }
     return text
     }
+    
+    init(_ requested: Int,_ addCount: Int,_ problems: [Int],_ operationStatus: OperationStatus,_ myShifts : [Int]) {
+        self.requested = requested
+        self.addCount = addCount
+        self.problems = problems
+        self.operationStatus = operationStatus
+        self.myShifts = myShifts
+    }
 }
 
+
+
+struct BonusResult {
+    var day : Day
+    var bonus : Bonus
+    var overRidden : Bool
+}
+
+
 struct UpdateBonusReport {
-    let monthKey: MonthKey
     let mode : UpdateMode
-    let result : [(day: Int, bonus: Int)]
-    let scippedDays : [Int]
+    let logs : [BonusResult]
+    let skippedDays : [Day]
     let operationStatus: OperationStatus
     
+    var overridenValues : [Int] {
+        return logs.filter { $0.overRidden }.map { $0.day }
+    }
+    
+    
     var logText : String {
-        var text = "=======✅ UpdateBonuses | \(monthKey) ======="
+        var text = "=======✅ UpdateBonuses |  ======="
         text += "\nMode:\(mode.title)"
-        text += "\nAdd \(result.count)/\(result.count + scippedDays.count) days\n"
-        for (day, bonus) in result {
-                text += "\(day) : \(bonus)\n"
+        
+        
+        text += "\nAdd \(logs.count)/\(logs.count + skippedDays.count) days"
+        if mode == .override {
+            text += "\nOverriden \(overridenValues.count)/\(logs.count)\n"
+        }
+        
+        for value in logs {
+            let safeBonus = value.bonus ?? 0
+            let mark = value.overRidden ? "🔄" : "🆕"
+            text += "\(value.day) : \(safeBonus)\(mark)\n"
             }
         if operationStatus == .warning {
-            text += "\n⚠️ Skipped: \(scippedDays.sorted())"
+            text += "\n⚠️ Skipped: \(skippedDays.sorted())"
         }
         text += "===============================\n"
         return text
@@ -185,365 +244,299 @@ enum SalaryWarning {
     case bonusesNotForAllShifts
 }
 
-// MARK: DataBase
-var workDaysByMonth: WorkDaysStorage = [:]
-var bonusesByMonth: BonusesStorage = [:]
 
-
-
-
-
-// MARK: Month key
-func makeMonthKey(year y: Int, month m: Int) -> MonthKey {
-    if m < 10 {
-        return "\(y)-0\(m)"
-    } else {
-        return "\(y)-\(m)"
-    }
-}
-
-
-
-// MARK: UpdateDays
-func updateDays(forYear y: Int, forMonth m: Int, daysData d: [Int]) -> ([WorkDay]) {
-    var newMonthData : [WorkDay] = []
-    for dayValue in d {
-        newMonthData.append((day: dayValue, month: m, year: y))
-    }
-    return newMonthData
-}
-
-
-// TODO: Add Report
-
-func addToDataBase(monthKey key: MonthKey, setFromUpdateDays monthData:[WorkDay], setDataBaseWorkDays dataBase: inout [MonthKey: [WorkDay]]) -> Result<AppReport,AppErorr> {
+enum ShiftUpdateMode {
+    case add
+    case remove
     
-    guard !monthData.isEmpty else {
-        return .failure(.emptyInput)
-    }
-    
-    var currentMonthDays : [WorkDay] = dataBase[key] ?? []
-    var addCount = 0
-    var dublicateDays : [Int] = []
-    
-    for value in monthData {
-        let isDublicate = currentMonthDays.contains { $0 == value }
-        if isDublicate {
-            dublicateDays.append(value.day)
-        } else {
-            addCount += 1
-            currentMonthDays.append(value)
-        }
-    }
-    let status : OperationStatus = (addCount > 0) && (dublicateDays.isEmpty) ? .success : .warning
-    let report = AddDaysReport(monthKey: key, requested: monthData.count, addCount: addCount, dublicates: dublicateDays, operationStatus: status)
-    dataBase[key] = currentMonthDays.sorted { $0.day < $1.day }
-    return .success(.addDays(report))
-
-}
-
-    
-func updateDateForHalfMonth (year y: Int, month m: Int, addDays d: [Int], selectDataBase: inout WorkDaysStorage) -> Result<AppReport,AppErorr> {
-    let month = updateDays(forYear: y, forMonth: m, daysData: d)
-    let monthKey = makeMonthKey(year: y, month: m)
-    let report = addToDataBase(monthKey: monthKey, setFromUpdateDays: month, setDataBaseWorkDays: &selectDataBase)
-    return report
-}
-
-
-
-
-
-
-// MARK: Update Bonuses
-// TODO: UpdateBonuses Report
-func updateBonus (days d: [Int], bonuses b: [Int]) -> Result<BonusStorageItem, AppErorr> {
-    var newBonusData : BonusStorageItem = [:]
-    let set = Set(d)
-    
-    guard d.count == b.count else {
-        return .failure(.missmutchBonusesAndDays)
-    }
-    
-    guard set.count == d.count else {
-        return .failure(.dublicateDetacted)
-    }
-   
-    for (day,bonus) in zip(d, b) {
-        newBonusData[day] = bonus
-    }
-    return .success(newBonusData)
-}
-
-// MARK: Update Bonuses Mode
-enum UpdateMode {
-    case override
-    case onlyAdd
-    
-    var title : String {
+    var isWorking : Bool {
         switch self {
-        case .override: return "OverRide"
-        case .onlyAdd: return "Only Add"
+        case .add:
+        return true
+        case .remove:
+        return false
         }
     }
 }
 
-func addBonusesToDataBase (monthKey key: MonthKey, setFromUpdateBonus newBonuses: BonusStorageItem, setBonusesStorage bonusData: inout BonusesStorage, updateMode mode: UpdateMode) -> Result<AppReport,AppErorr> {
-    guard !newBonuses.isEmpty else {
-        return .failure(.missmutchBonusesAndDays)
+struct WorkDay {
+    var day: Day
+    var month: Month
+    var year: Year
+    var bonus: Bonus
+    var isMyShift : Bool
+    
+    var sortKey : Int  {
+        return year * 10000 + month * 100 + day
+    }
+}
+
+
+
+struct SalaryCalculator {
+    let rate = 1000
+    
+//    let realSalary: Int
+
+    
+    func calculate(_ days: [WorkDay],_ range: [Day]) -> SalaryReport {
+        // group
+        let plannedShifts = days.filter {$0.isMyShift}
+        let workedShifts = plannedShifts.filter {$0.bonus != nil}
+        
+        let noDataShifts = plannedShifts.filter {$0.bonus == nil}
+        
+        let allDaysWithBonuses =  days.filter {$0.bonus != nil}
+        
+        // map
+        let workedDays = workedShifts.map {$0.day}
+        let noDataDays = noDataShifts.map {$0.day}
+        
+        // count
+        let myBonuses = workedShifts.compactMap {$0.bonus} .reduce(0, +)
+        let allBonuses = days.compactMap {$0.bonus} .reduce(0, +)
+        
+        var status : OperationStatus = .success
+        var warning : SalaryWarning?
+        
+        if noDataDays.count > 0 {
+            status = .warning
+            warning = .bonusesNotForAllShifts
+        }
+        
+        var myAvgBonuses = 0
+        if workedShifts.count > 0 {
+            myAvgBonuses = myBonuses / workedShifts.count
+        } else {
+            status = .warning
+            warning = .noBonusesForPeriod
+        }
+        
+        var avgBonuses = 0
+        if allDaysWithBonuses.count > 0 {
+            avgBonuses = allBonuses / allDaysWithBonuses.count
+        } else {
+            status = .warning
+            warning = .noBonusesForPeriod
+        }
+        
+        
+        let guardSalary = (plannedShifts.count * rate) + myBonuses
+        let realSalary = ((workedShifts.count) * rate) + myBonuses
+        let predictableSalary = (realSalary) + (noDataDays.count * (myAvgBonuses + rate))
+        
+        
+        
+        let report = SalaryReport(realSalary: realSalary, guardSalary: guardSalary, predictableSalary: predictableSalary, plannedCount: plannedShifts.count, myBonuses: myBonuses, myAvgBonuses: myAvgBonuses, avgBonuses: avgBonuses, noDataDays: noDataDays, workedDays: workedDays, range: range, operationStatus: status, warning: warning)
+        return report
+    }
+}
+
+//TODO: добавить везде защиту валид дня
+class SalaryManager {
+    private var workDaysByMonth : WorkDaysStorage = []
+    
+    private var validYear = 2025...2035
+    private func isValidDate (forYear year: Year, month: Month, days: [Day]? = nil) -> Bool {
+        
+        guard validYear.contains(year) else {
+            return false
+        }
+        
+        guard (1...12).contains(month) else {
+            return false
+        }
+        
+        if let tempDays = days {
+            guard let maxDay = tempDays.max(), let minDay = tempDays.min() else {
+                return false
+            }
+            
+            guard maxDay <= maxDays(year,month) && minDay >= 1 else {
+                return false
+            }
+        }
+        
+        return true
+    }
+    private func maxDays(_ year: Year,_ month: Month) -> Int {
+        switch month {
+        case 4, 6, 9, 11: return 30
+        case 2:
+            // Високосный год: делится на 4, но не на 100 (кроме тех, что на 400)
+            let isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+            return isLeap ? 29 : 28
+        default: return 31
+        }
     }
     
-    var monthBonuses : BonusStorageItem = bonusData[key] ?? [:]
-    var applied : [Int:Int] = [:]
-    var skippedDays : [Int] = []
-    switch mode {
-        
-    case .override :
-        for (day, bonus) in newBonuses {
-            monthBonuses[day] = bonus
-            applied[day] = bonus
+    func daysCount (forYear year: Year, month: Month) -> Int? {
+        guard isValidDate(forYear: year, month: month) else {
+            return nil
         }
-    case .onlyAdd :
-        for (day, bonus) in newBonuses {
-            if monthBonuses[day] == nil {
-                monthBonuses[day] = bonus
-                applied[day] = bonus
+        
+        let filtered = workDaysByMonth.filter {$0.year == year && $0.month == month}
+        return filtered.count
+    }
+    
+    func createMonth (forYear year: Year, month: Month) -> Result<AppReport,AppError> {
+        guard isValidDate(forYear: year, month: month) else {
+            return .failure(.wrongInput)
+        }
+        let lastDay = maxDays(year, month)
+        for day in 1...lastDay {
+            
+            let isDublicate = workDaysByMonth.contains {$0.day == day && $0.month == month && $0.year == year }
+            
+            if !isDublicate {
+                workDaysByMonth.append(WorkDay(day: day, month: month, year: year, bonus: nil, isMyShift: false))
+            }
+        }
+        
+        workDaysByMonth.sort {$0.sortKey < $1.sortKey}
+        return .success(.createMonth(.init(daysCount: lastDay, month: month, year: year)))
+        
+    }
+    
+    func shiftsGetDays (forYear year: Year, month: Month) -> [Day] {
+        
+        guard isValidDate(forYear: year, month: month) else {
+            return []
+        }
+        
+        let myShifts = workDaysByMonth.filter {$0.year == year && $0.month == month && $0.isMyShift == true}
+        return myShifts.map {$0.day}
+    }
+    
+    func shiftsUpdateDays (_ mode: ShiftUpdateMode, forYear year: Year, month: Month, setDays days: [Day]) -> Result<AppReport, AppError> {
+        guard isValidDate(forYear: year, month: month, days: days) else {
+            return .failure(.wrongInput)
+        }
+        
+        guard !days.isEmpty else {
+            return .failure(AppError.emptyInput)
+        }
+        
+        guard workDaysByMonth.contains(where: {$0.year == year && $0.month == month}) else {
+            return .failure(AppError.emptyMonth)
+        }
+        
+        let requested = days.count
+        var addCount = 0
+        var problems : [Int] = []
+        var operationStatus = OperationStatus.warning
+        
+        for day in days {
+            
+            if let index = workDaysByMonth.firstIndex(where: {$0.year == year && $0.month == month && $0.day == day}) {
+                workDaysByMonth[index].isMyShift = mode.isWorking
+                addCount += 1
+            } else {
+                problems.append(day)
+            }
+        }
+        
+        if problems.isEmpty {
+            operationStatus = OperationStatus.success
+        }
+        
+        let mySifts = shiftsGetDays(forYear: year, month: month)
+        
+        return .success(.addDays(AddDaysReport(requested, addCount, problems, operationStatus, mySifts)))
+    }
+    
+    func removeMonth (forYear year: Year, month: Month) -> Result<AppReport, AppError> {
+        
+        guard isValidDate(forYear: year, month: month) else {
+            return .failure(.wrongInput)
+        }
+        
+        let tempCount = workDaysByMonth.count
+        
+        workDaysByMonth.removeAll {$0.month == month && $0.year == year}
+        let removedCount = tempCount - workDaysByMonth.count
+        
+        let operationStatus : OperationStatus = removedCount > 0 ? .success : .warning
+        
+        return .success(.removeDays(.init(removedCount: removedCount, operationStatus: operationStatus)))
+
+        
+    }
+    
+    func bonusesUpdateFor (year: Year, month: Month, days: [Day], setBonuses bonuses: [Bonus], updateMode mode: UpdateMode) -> Result<AppReport,AppError> {
+        
+        
+        let set = Set(days)
+        
+        guard isValidDate(forYear: year, month: month, days: days) else {
+            return .failure(.wrongInput)
+        }
+        
+        guard workDaysByMonth.firstIndex(where:  {$0.year == year && $0.month == month}) != nil else {
+            return .failure(.emptyMonth)
+        }
+        
+        guard days.count == bonuses.count else {
+            return .failure(.mismatchBonusesAndDays)
+        }
+        
+        guard set.count == days.count else {
+            return .failure(.duplicateDetected)
+        }
+        
+        var skippedDays : [Day] = []
+        var logs : [BonusResult] = []
+        
+        
+        
+        for (day,bonus) in zip(days, bonuses) {
+            
+            if let index = workDaysByMonth.firstIndex(where: {$0.year == year && $0.month == month && $0.day == day}) {
+                let hasValue = workDaysByMonth[index].bonus != nil
+                
+                switch mode {
+                case .onlyAdd:
+                    if !hasValue {
+                        workDaysByMonth[index].bonus = bonus
+                        logs.append(BonusResult(day: day, bonus: bonus, overRidden: false))
+                    } else {
+                        skippedDays.append(day)
+                    }
+                case .override:
+                    workDaysByMonth[index].bonus = bonus
+                    logs.append(BonusResult(day: day, bonus: bonus, overRidden: hasValue))
+                }
+                
             } else {
                 skippedDays.append(day)
             }
         }
+    
+        let status : OperationStatus = skippedDays.isEmpty ? .success : .warning
+        let report = UpdateBonusReport(mode: mode, logs: logs, skippedDays: skippedDays, operationStatus: status)
+        return .success(.addBonus(report))
     }
     
-    bonusData[key] = monthBonuses
-    let sorted = sortDict(applied)
-    let status : OperationStatus = skippedDays.isEmpty ? .success : .warning
-    let report = UpdateBonusReport(monthKey: key, mode: mode, result: sorted, scippedDays: skippedDays, operationStatus: status)
-    return .success(.addBonus(report))
-}
-
-func sortDict (_ d:[Int:Int]) -> [(day:Int,bonus:Int)] {
-    return d.sorted { $0.key < $1.key }.map {(day: $0.key, bonus: $0.value)}
-}
-
-func updateBonusesForRange (updateMode mode: UpdateMode, year y: Int, month m: Int, addDays days: [Int], addBonuses bonuses: [Int], setBonusesStorage bonusData: inout BonusesStorage) -> Result<AppReport,AppErorr> {
-    
-    let monthKey = makeMonthKey(year: y, month: m)
-    switch updateBonus(days: days, bonuses: bonuses) {
-      case .success(let newBonuses):
-          return addBonusesToDataBase(
-              monthKey: monthKey,
-              setFromUpdateBonus: newBonuses,
-              setBonusesStorage: &bonusData,
-              updateMode: mode
-          )
-
-      case .failure(let error):
-          return .failure(error)
-      }
-  }
-
-
-
-
-
-
-// MARK: Remove days
-func removeSelectDays (selectDaysToRemove rDays: [Int], year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> Result<AppReport,AppErorr> {
-    let removeSet : Set<Int> = Set(rDays)
-    let monthKey = makeMonthKey(year: y, month: m)
-    var updatedData : [WorkDay] = []
-    
-    
-    guard let monthDays = dateBase[monthKey] else {
-        return .failure(.emptyMonthForKey)
-    }
-    
-    let monthDaysSet = Set(monthDays.map {$0.day})
-    let foundToRemove = Set(removeSet.filter {monthDaysSet.contains($0)})
-    let notFound = Set(removeSet.filter {!monthDaysSet.contains($0)})
-    
-    if foundToRemove.isEmpty {
-        return .failure(.nothingToRemove)
-    }
-    
-    updatedData = monthDays.filter {!foundToRemove.contains($0.day)}
-    let status : OperationStatus = foundToRemove.count == removeSet.count ? .success : .warning
-    let report = RemoveDaysReport(monthKey: monthKey, requested: removeSet.count, removed: foundToRemove.count, notFoundDays: Array(notFound), monthRemoved: updatedData.isEmpty, operationStatus: status)
-   
-    
-    if updatedData.isEmpty {
-        dateBase[monthKey] = nil
-    } else {
-        dateBase[monthKey] = updatedData
-    }
-    return .success(.removeDays(report))
-}
-
-
-
-func removeAllMonth (year y: Int, month m: Int, selectDateBase dataBase: inout WorkDaysStorage) -> Result<AppReport,AppErorr> {
-    let monthKey = makeMonthKey(year: y, month: m)
-    if let tempBase = dataBase[monthKey] {
-        let report = RemoveDaysReport(monthKey: monthKey, requested: tempBase.count, removed: tempBase.count, notFoundDays: [], monthRemoved: true, operationStatus: .success)
-        dataBase[monthKey] = nil
-        return .success(.removeDays(report))
-    } else {
-        return .failure(.nothingToRemove)
-    }
-}
-
-
-
-func removeRangeDays (selectDaysToRemove rDays: ClosedRange<Int>, year y: Int, month m: Int, selectDateBase dateBase: inout WorkDaysStorage) -> Result<AppReport,AppErorr> {
-    let array = Array(rDays)
-    return removeSelectDays(selectDaysToRemove: array, year: y, month: m, selectDateBase: &dateBase)
-}
-
-
-
-
-
-
-// MARK: Filter days
-func filterDaysRange (monthKey key: MonthKey, rangeDays d:ClosedRange<Int>, selectDateBase dateBase: WorkDaysStorage) -> [Int] {
-    let monthDays = dateBase[key] ?? []
-    let outputWorkDays : [Int] = monthDays
-        .map{ $0.day }
-        .filter { d.contains($0) }
-        .sorted{ $0 < $1 }
-    return outputWorkDays
-}
-
-
-
-
-
-
-// MARK: Calculate
-func calcMyShiftStats (
-    filterDays: [Int],
-    monthBonuses: [Int: Int]
-) -> (
-    myBonuses: Int,
-    workedCount: Int,
-    noDataCount: Int,
-    workedDays: [Int],
-    noDataDays: [Int]
-) {
-    var myBonuses = 0
-    var workedCount = 0
-    var noDataCount = 0
-    var workedDays : [Int] = []
-    var noDataDays : [Int] = []
-    
-    for day in filterDays {
-        if let realBonuses = monthBonuses[day] {
-            myBonuses += realBonuses
-            workedCount += 1
-            workedDays.append(day)
-        } else {
-            noDataCount += 1
-            noDataDays.append(day)
+    func getSalaryFor (year: Year, month: Month, days: [Day]? = nil ) -> Result<AppReport, AppError> {
+        
+        guard isValidDate(forYear: year, month: month, days: days) else {
+            return .failure(.wrongInput)
         }
+        
+        let actualRange = days ?? Array(1...maxDays(year, month))
+        let daysToCalculate = workDaysByMonth.filter {$0.year == year && $0.month == month && actualRange.contains($0.day)}
+        
+        let calculator = SalaryCalculator()
+        let report = calculator.calculate(daysToCalculate, actualRange)
+        
+        return  .success(.salary(report))
     }
-    
-    return (myBonuses,workedCount,noDataCount,workedDays,noDataDays)
-}
-
-
-    
-
-func calcAvgBonusForRange (
-    monthBonuses: [Int:Int],
-    range: ClosedRange<Int>
-) -> (
-    allBonuses: Int,
-    avgBonuses:Int,
-    allBonusesCount: Int
-) {
-    let filtered = monthBonuses.filter {range.contains($0.key)}
-    let allBonusesCount = filtered.count
-    let allBonuses = filtered.reduce(0) {$0 + $1.value}
-    let avgBonuses = allBonusesCount > 0 ? allBonuses / allBonusesCount : 0
-    
-    return (allBonuses,avgBonuses,allBonusesCount)
-}
-
-// FIXME: IF BONUS = [:] NEED ADD ALERT!
-func SalaryCalculateRange (selectDaysRange range: ClosedRange<Int>, monthKey key: MonthKey, funcFilterDays filterDays: [Int], setFixedPay fixedPay: Int = 1000, selectBonusDateBase bonusDb: BonusesStorage) -> Result<AppReport,AppErorr> {
-    
-    
-    guard !filterDays.isEmpty else {
-        return .failure(.noDaysForRange)
-    }
-    let monthBonuses : [Int:Int] = bonusDb[key] ?? [:]
-    
-    let stats = calcMyShiftStats(filterDays: filterDays, monthBonuses: monthBonuses)
-    let avgStats = calcAvgBonusForRange(monthBonuses: monthBonuses, range: range)
-    
-    let plannedCount = filterDays.count
-    let guardSalary = (fixedPay * plannedCount) + stats.myBonuses
-    let realSalaryToday = stats.myBonuses + (fixedPay * stats.workedCount)
-    
-    var myAvgBonus = 0
-    if stats.workedCount > 0 {
-        myAvgBonus = (stats.myBonuses / stats.workedCount)
-    }
-    let predictableSalary = (fixedPay * plannedCount) + (myAvgBonus * stats.noDataCount) + stats.myBonuses
-    let status: OperationStatus
-    let warning : SalaryWarning?
-    if monthBonuses.isEmpty || stats.workedCount == 0 {
-        status = .warning
-        warning = .noBonusesForPeriod
-    } else if stats.noDataCount > 0 {
-        status = .warning
-        warning = .bonusesNotForAllShifts
-    } else {
-        status = .success
-        warning = nil
-    }
-    
-    let report = SalaryReport(
-        realSalary: realSalaryToday,
-        guardSalary: guardSalary,
-        predictableSalary: predictableSalary,
-        noDataCount: stats.noDataCount,
-        workedCount: stats.workedCount,
-        plannedCount: plannedCount,
-        myBonuses: stats.myBonuses,
-        myAvgBonuses: myAvgBonus,
-        avgBonuses: avgStats.avgBonuses,
-        noDataDays: stats.noDataDays,
-        workedDays: stats.workedDays,
-        monthKey: key,
-        range: range,
-        operationStatus: status,
-        warning: warning)
-    return .success(.salary(report))
-}
-
-
-
-
-// обертка калькулятора
-func salaryHalfMonth (
-    year y: Int,
-    month m: Int,
-    setPeriod range: ClosedRange<Int>,
-    workDaysDB: WorkDaysStorage,
-    bonusDB: BonusesStorage
-) -> Result<AppReport,AppErorr> {
-    let monthKey = makeMonthKey(year: y, month: m)
-    let filterDays = filterDaysRange(monthKey: monthKey, rangeDays: range, selectDateBase: workDaysDB)
-    let allStats = SalaryCalculateRange(selectDaysRange: range, monthKey: monthKey, funcFilterDays: filterDays, selectBonusDateBase: bonusDB)
-
-    return allStats
     
 }
 
 
 // helper
-func printResult (_ result: Result<AppReport, AppErorr>) {
+func printResult (_ result: Result<AppReport, AppError>) {
     switch result {
     case .success(let report):
         print(report.logText)
@@ -552,21 +545,28 @@ func printResult (_ result: Result<AppReport, AppErorr>) {
     }
 }
 
+var app = SalaryManager()
 
+app.createMonth(forYear: 2026, month: 01)
+app.createMonth(forYear: 2026, month: 02)
+app.createMonth(forYear: 2026, month: 03)
+app.createMonth(forYear: 2026, month: 04)
 
+app.shiftsUpdateDays(.add, forYear: 2026, month: 01, setDays: [4,5,6,9,10,11,14,15,19,20,21,24,25,26,29,30,31])
+app.shiftsUpdateDays(.add, forYear: 2026, month: 02, setDays: [1,2,3,6,7,9,12,13,15])
+app.shiftsUpdateDays(.add, forYear: 2026, month: 02, setDays: [16,17,20,21,22,25,26,27])
+app.shiftsUpdateDays(.add, forYear: 2026, month: 03, setDays: [1,5,6,7,10,11,14,15])
+app.shiftsUpdateDays(.add, forYear: 2026, month: 03, setDays: [16,17,20,21,22,23,26,27,28])
 
+app.bonusesUpdateFor(year: 2026, month: 01, days: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], setBonuses: [400,200,150,150,100,150,100,300,250,350,250,400,300,250], updateMode: .onlyAdd)
 
-printResult(updateDateForHalfMonth(year: 2026, month: 01, addDays: [4,5,6,9,10,11,14,15,19,20,21,24,25,26,29,30,31], selectDataBase: &workDaysByMonth))
-let rep02 = updateDateForHalfMonth(year: 2026, month: 02, addDays: [1,2,3,6,7,9,12,13,15], selectDataBase: &workDaysByMonth)
-printResult(rep02)
-let rep03 = updateBonusesForRange(updateMode: .override, year: 2026, month: 2, addDays: [1,2,3,4,5,6,7,8,9], addBonuses: [450,0,250,100,450,600,1200,600,0], setBonusesStorage: &bonusesByMonth)
-printResult(rep03)
-let rep04 = updateBonusesForRange(updateMode: .override, year: 2026, month: 01, addDays: [2,3,4,5,6,7,8,9,10,11,12,13,14,15], addBonuses: [400,200,150,150,100,150,100,300,250,350,250,400,300,250], setBonusesStorage: &bonusesByMonth)
-printResult(rep04)
-let rep05 = updateBonusesForRange(updateMode: .override, year: 2026, month: 1, addDays: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], addBonuses: [500,1000,500,200,1400,350,900,1050,1000,350,200,100,150,0,550,400], setBonusesStorage: &bonusesByMonth)
-printResult(rep05)
-let rep06 = updateBonusesForRange(updateMode: .onlyAdd, year: 2026, month: 2, addDays: [10,11,12,13,14,15], addBonuses: [150,250,200,250,950,450], setBonusesStorage: &bonusesByMonth)
-printResult(rep06)
-let report = salaryHalfMonth(year: 2026, month: 2, setPeriod: 1...15, workDaysDB: workDaysByMonth, bonusDB: bonusesByMonth)
-printResult(report)
- 
+app.bonusesUpdateFor(year: 2026, month: 01, days: [16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], setBonuses: [500,1000,500,200,1400,350,900,1050,1000,350,200,100,150,0,550,400], updateMode: .onlyAdd)
+
+app.bonusesUpdateFor(year: 2026, month: 02, days: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], setBonuses: [450,0,250,100,450,600,1200,600,0,150,250,200,250,950,450], updateMode: .onlyAdd)
+
+app.bonusesUpdateFor(year: 2026, month: 02, days: [16,17,18,19,20,21,22,23,24,25,26,27,28], setBonuses: [0,0,400,0,250,1150,350,0,0,100,100,350,650], updateMode: .onlyAdd)
+
+app.bonusesUpdateFor(year: 2026, month: 03, days: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], setBonuses: [850,0,0,200,350,350,450,1200,100,450,300,350,600,600,750], updateMode: .onlyAdd)
+
+printResult(app.getSalaryFor(year: 2026, month: 03))
+
