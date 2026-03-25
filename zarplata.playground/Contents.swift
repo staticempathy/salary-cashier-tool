@@ -276,9 +276,6 @@ struct WorkDay {
 struct SalaryCalculator {
     let rate = 1000
     
-//    let realSalary: Int
-
-    
     func calculate(_ days: [WorkDay],_ range: [Day]) -> SalaryReport {
         // group
         let plannedShifts = days.filter {$0.isMyShift}
@@ -332,13 +329,22 @@ struct SalaryCalculator {
     }
 }
 
-
-class SalaryManager {
-    private var workDaysByMonth : WorkDaysStorage = []
+enum DateValidation {
     
-    private var validYear = 2025...2035
+    static let validYear = 2025...2035
     
-    private func isValidDate (forYear year: Year, month: Month, days: [Day]? = nil) -> Bool {
+    static func maxDays(_ year: Year,_ month: Month) -> Int {
+        switch month {
+        case 4, 6, 9, 11: return 30
+        case 2:
+            // Високосный год: делится на 4, но не на 100 (кроме тех, что на 400)
+            let isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+            return isLeap ? 29 : 28
+        default: return 31
+        }
+    }
+    
+    static func isValidDate (forYear year: Year, month: Month, days: [Day]? = nil) -> Bool {
         
         guard validYear.contains(year) else {
             return false
@@ -361,16 +367,10 @@ class SalaryManager {
         return true
     }
     
-    private func maxDays(_ year: Year,_ month: Month) -> Int {
-        switch month {
-        case 4, 6, 9, 11: return 30
-        case 2:
-            // Високосный год: делится на 4, но не на 100 (кроме тех, что на 400)
-            let isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-            return isLeap ? 29 : 28
-        default: return 31
-        }
-    }
+}
+
+class SalaryManager {
+    private var workDaysByMonth : WorkDaysStorage = []
     
     private func sortDays() {
         workDaysByMonth.sort {$0.sortKey < $1.sortKey}
@@ -389,7 +389,7 @@ class SalaryManager {
     }
     
     func daysCount (forYear year: Year, month: Month) -> Int? {
-        guard isValidDate(forYear: year, month: month) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return nil
         }
         
@@ -397,7 +397,7 @@ class SalaryManager {
     }
     
     func createMonth (forYear year: Year, month: Month) -> Result<AppReport,AppError> {
-        guard isValidDate(forYear: year, month: month) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
         
@@ -405,7 +405,7 @@ class SalaryManager {
             return .failure(.duplicateDetected)
         }
         
-        let lastDay = maxDays(year, month)
+        let lastDay = DateValidation.maxDays(year, month)
         
         for day in 1...lastDay {
             workDaysByMonth.append(WorkDay(day: day, month: month, year: year, bonus: nil, isMyShift: false))
@@ -419,7 +419,7 @@ class SalaryManager {
     
     func shiftsGetDays (forYear year: Year, month: Month) -> [Day] {
         
-        guard isValidDate(forYear: year, month: month) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return []
         }
         
@@ -429,7 +429,7 @@ class SalaryManager {
     }
     
     func shiftsUpdateDays (_ mode: ShiftUpdateMode, forYear year: Year, month: Month, setDays days: [Day]) -> Result<AppReport, AppError> {
-        guard isValidDate(forYear: year, month: month, days: days) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
         
@@ -467,7 +467,7 @@ class SalaryManager {
     
     func removeMonth (forYear year: Year, month: Month) -> Result<AppReport, AppError> {
         
-        guard isValidDate(forYear: year, month: month) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
         
@@ -488,7 +488,7 @@ class SalaryManager {
         
         let set = Set(days)
         
-        guard isValidDate(forYear: year, month: month, days: days) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
         
@@ -539,11 +539,11 @@ class SalaryManager {
     
     func getSalaryFor (year: Year, month: Month, days: [Day]? = nil ) -> Result<AppReport, AppError> {
         
-        guard isValidDate(forYear: year, month: month, days: days) else {
+        guard DateValidation.isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
         
-        let actualRange = days ?? Array(1...maxDays(year, month))
+        let actualRange = days ?? Array(1...DateValidation.maxDays(year, month))
         
         let currentDays = getDaysFor(year, month)
         let daysToCalculate = currentDays.filter {actualRange.contains($0.day)}
@@ -597,3 +597,64 @@ app.bonusesUpdateFor(year: 2026, month: 03, days: Array(16...23), setBonuses: [2
 printResult(app.getSalaryFor(year: 2026, month: 03, days: Array(16...31)))
 
 
+import XCTest
+
+class SalaryAppTests: XCTestCase {
+    
+    // ТЕСТ 1: Проверяем чистую математику (SalaryCalculator)
+    func testCalculator_withMixedShifts_shouldCalculateCorrectly() {
+        // 1. GIVEN
+        let calculator = SalaryCalculator() // Ваша ставка 1000 по умолчанию
+        
+        let day1 = WorkDay(day: 1, month: 1, year: 2026, bonus: 500, isMyShift: true) // Отработал, бонус 500
+        let day2 = WorkDay(day: 2, month: 1, year: 2026, bonus: nil, isMyShift: true) // Ждет своей очереди (нет данных)
+        let day3 = WorkDay(day: 3, month: 1, year: 2026, bonus: nil, isMyShift: false) // Чужая смена (выходной)
+        
+        // 2. WHEN
+        let report = calculator.calculate([day1, day2, day3], [1, 2, 3])
+        
+        // 3. THEN
+        // Отработана 1 смена = 1000 + 500 бонус = 1500
+        XCTAssertEqual(report.realSalary, 1500, "❌ Текущая ЗП (realSalary) посчитана неверно")
+        
+        // Запланировано 2 смены = 2000 + 500 (уже заработанный бонус) = 2500
+        XCTAssertEqual(report.guardSalary, 2500, "❌ Гарантированная ЗП (guardSalary) посчитана неверно")
+        
+        // Прогноз: 1500 (уже есть) + 1 оставшаяся смена * (1000 ставка + 500 средний бонус) = 3000
+        XCTAssertEqual(report.predictableSalary, 3000, "❌ Прогноз ЗП (predictableSalary) посчитан неверно")
+        
+        XCTAssertEqual(report.plannedCount, 2, "❌ Неверное количество запланированных смен")
+        XCTAssertEqual(report.workedCount, 1, "❌ Неверное количество отработанных смен")
+    }
+    
+    // ТЕСТ 2: Проверяем работу самого SalaryManager (Интеграция)
+    // Это ваша главная страховка перед переходом на Словари!
+    func testManager_fullCycle_shouldReturnCorrectReport() {
+        // 1. GIVEN
+        let manager = SalaryManager()
+        
+        // 2. WHEN (Симулируем действия пользователя)
+        _ = manager.createMonth(forYear: 2026, month: 5) // Май
+        _ = manager.shiftsUpdateDays(.add, forYear: 2026, month: 5, setDays: [10, 11]) // Ставим 2 смены
+        _ = manager.bonusesUpdateFor(year: 2026, month: 5, days: [10], setBonuses: [300], updateMode: .onlyAdd) // 1 отработали с бонусом 300
+        
+        let result = manager.getSalaryFor(year: 2026, month: 5) // Запрашиваем ЗП
+        
+        // 3. THEN
+        switch result {
+        case .success(let reportType):
+            if case .salary(let report) = reportType {
+                // Проверяем: 1 смена отработана (1000 + 300), 1 смена еще нет.
+                XCTAssertEqual(report.realSalary, 1300, "Интеграция: Ошибка в realSalary")
+                XCTAssertEqual(report.guardSalary, 2300, "Интеграция: Ошибка в guardSalary")
+            } else {
+                XCTFail("Менеджер вернул не отчет по зарплате, а другой AppReport")
+            }
+        case .failure(let error):
+            XCTFail("Менеджер выдал ошибку вместо результата: \(error)")
+        }
+    }
+}
+
+// Запускаем тесты в Playground
+SalaryAppTests.defaultTestSuite.run()
