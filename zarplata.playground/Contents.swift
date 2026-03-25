@@ -332,11 +332,12 @@ struct SalaryCalculator {
     }
 }
 
-//TODO: добавить везде защиту валид дня
+
 class SalaryManager {
     private var workDaysByMonth : WorkDaysStorage = []
     
     private var validYear = 2025...2035
+    
     private func isValidDate (forYear year: Year, month: Month, days: [Day]? = nil) -> Bool {
         
         guard validYear.contains(year) else {
@@ -359,6 +360,7 @@ class SalaryManager {
         
         return true
     }
+    
     private func maxDays(_ year: Year,_ month: Month) -> Int {
         switch month {
         case 4, 6, 9, 11: return 30
@@ -370,30 +372,47 @@ class SalaryManager {
         }
     }
     
+    private func sortDays() {
+        workDaysByMonth.sort {$0.sortKey < $1.sortKey}
+    }
+    
+    private func isMonthExist(forYear year: Year, month: Month) -> Bool {
+        workDaysByMonth.contains {$0.year == year && $0.month == month}
+    }
+    
+    private func getIndexFor(_ year: Year,_ month: Month,_ day: Day) -> Int? {
+        return workDaysByMonth.firstIndex(where: {$0.year == year && $0.month == month && $0.day == day})
+    }
+    
+    private func getDaysFor(_ year: Year,_ month: Month) -> [WorkDay] {
+        return workDaysByMonth.filter {$0.year == year && $0.month == month}
+    }
+    
     func daysCount (forYear year: Year, month: Month) -> Int? {
         guard isValidDate(forYear: year, month: month) else {
             return nil
         }
         
-        let filtered = workDaysByMonth.filter {$0.year == year && $0.month == month}
-        return filtered.count
+        return getDaysFor(year, month).count
     }
     
     func createMonth (forYear year: Year, month: Month) -> Result<AppReport,AppError> {
         guard isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
-        let lastDay = maxDays(year, month)
-        for day in 1...lastDay {
-            
-            let isDublicate = workDaysByMonth.contains {$0.day == day && $0.month == month && $0.year == year }
-            
-            if !isDublicate {
-                workDaysByMonth.append(WorkDay(day: day, month: month, year: year, bonus: nil, isMyShift: false))
-            }
+        
+        guard !isMonthExist(forYear: year, month: month) else {
+            return .failure(.duplicateDetected)
         }
         
-        workDaysByMonth.sort {$0.sortKey < $1.sortKey}
+        let lastDay = maxDays(year, month)
+        
+        for day in 1...lastDay {
+            workDaysByMonth.append(WorkDay(day: day, month: month, year: year, bonus: nil, isMyShift: false))
+        }
+        
+        
+        sortDays()
         return .success(.createMonth(.init(daysCount: lastDay, month: month, year: year)))
         
     }
@@ -404,7 +423,8 @@ class SalaryManager {
             return []
         }
         
-        let myShifts = workDaysByMonth.filter {$0.year == year && $0.month == month && $0.isMyShift == true}
+        let monthDays = getDaysFor(year, month  )
+        let myShifts = monthDays.filter {$0.isMyShift}
         return myShifts.map {$0.day}
     }
     
@@ -417,7 +437,7 @@ class SalaryManager {
             return .failure(AppError.emptyInput)
         }
         
-        guard workDaysByMonth.contains(where: {$0.year == year && $0.month == month}) else {
+        guard isMonthExist(forYear: year, month: month) else {
             return .failure(AppError.emptyMonth)
         }
         
@@ -428,7 +448,7 @@ class SalaryManager {
         
         for day in days {
             
-            if let index = workDaysByMonth.firstIndex(where: {$0.year == year && $0.month == month && $0.day == day}) {
+            if let index = getIndexFor(year, month, day) {
                 workDaysByMonth[index].isMyShift = mode.isWorking
                 addCount += 1
             } else {
@@ -472,7 +492,7 @@ class SalaryManager {
             return .failure(.wrongInput)
         }
         
-        guard workDaysByMonth.firstIndex(where:  {$0.year == year && $0.month == month}) != nil else {
+        guard isMonthExist(forYear: year, month: month) else {
             return .failure(.emptyMonth)
         }
         
@@ -491,7 +511,7 @@ class SalaryManager {
         
         for (day,bonus) in zip(days, bonuses) {
             
-            if let index = workDaysByMonth.firstIndex(where: {$0.year == year && $0.month == month && $0.day == day}) {
+            if let index = getIndexFor(year, month, day) {
                 let hasValue = workDaysByMonth[index].bonus != nil
                 
                 switch mode {
@@ -524,7 +544,9 @@ class SalaryManager {
         }
         
         let actualRange = days ?? Array(1...maxDays(year, month))
-        let daysToCalculate = workDaysByMonth.filter {$0.year == year && $0.month == month && actualRange.contains($0.day)}
+        
+        let currentDays = getDaysFor(year, month)
+        let daysToCalculate = currentDays.filter {actualRange.contains($0.day)}
         
         let calculator = SalaryCalculator()
         let report = calculator.calculate(daysToCalculate, actualRange)
@@ -569,4 +591,9 @@ app.bonusesUpdateFor(year: 2026, month: 02, days: [16,17,18,19,20,21,22,23,24,25
 app.bonusesUpdateFor(year: 2026, month: 03, days: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], setBonuses: [850,0,0,200,350,350,450,1200,100,450,300,350,600,600,750], updateMode: .onlyAdd)
 
 printResult(app.getSalaryFor(year: 2026, month: 03))
+
+printResult(app.shiftsUpdateDays(.add, forYear: 2026, month: 03, setDays: [16,17,20,21,22,23,26,27,28]))
+app.bonusesUpdateFor(year: 2026, month: 03, days: Array(16...23), setBonuses: [200,50,50,300,900,900,550,600], updateMode: .onlyAdd)
+printResult(app.getSalaryFor(year: 2026, month: 03, days: Array(16...31)))
+
 
