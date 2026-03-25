@@ -3,8 +3,9 @@ typealias Day = Int
 typealias Month = Int
 typealias Year = Int
 typealias Bonus = Int?
-typealias WorkDaysStorage = [WorkDay]
 
+typealias Key = Int
+typealias StorageItem = [Key : [WorkDay]]
 
 
 
@@ -369,50 +370,79 @@ enum DateValidation {
     
 }
 
+class SalaryStorage {
+    private var data : StorageItem = [:]
+    private func makeKey(_ year: Year,_ month: Month) -> Key {
+        return year * 100 + month
+    }
+    private func sortDays(_ year: Year,_ month: Month) {
+        let key = makeKey(year, month)
+        data[key]?.sort {$0.sortKey < $1 .sortKey}
+    }
+    
+    func isMonthExist(forYear year: Year, month: Month) -> Bool {
+        let key = makeKey(year, month)
+        return data[key] != nil
+    }
+    
+    func getDaysFor(forYear year: Year, month: Month) -> [WorkDay] {
+        let key = makeKey(year, month)
+        return data[key] ?? []
+    }
+    
+    func save(monthDays: [WorkDay], year: Year, month: Month) {
+        let key = makeKey(year, month)
+        let sortedDays = monthDays.sorted {$0.sortKey < $1 .sortKey}
+        data[key] = sortedDays
+    }
+    
+    func removeMonth(year: Year, month: Month) -> Bool {
+        let key = makeKey(year, month)
+        if data[key] != nil {
+            data[key] = nil
+            return true
+        } else {
+            return false
+        }
+    }
+}
+
+
 class SalaryManager {
-    private var workDaysByMonth : WorkDaysStorage = []
+    private let storage = SalaryStorage()
     
-    private func sortDays() {
-        workDaysByMonth.sort {$0.sortKey < $1.sortKey}
-    }
-    
-    private func isMonthExist(forYear year: Year, month: Month) -> Bool {
-        workDaysByMonth.contains {$0.year == year && $0.month == month}
-    }
-    
-    private func getIndexFor(_ year: Year,_ month: Month,_ day: Day) -> Int? {
-        return workDaysByMonth.firstIndex(where: {$0.year == year && $0.month == month && $0.day == day})
-    }
-    
-    private func getDaysFor(_ year: Year,_ month: Month) -> [WorkDay] {
-        return workDaysByMonth.filter {$0.year == year && $0.month == month}
-    }
     
     func daysCount (forYear year: Year, month: Month) -> Int? {
         guard DateValidation.isValidDate(forYear: year, month: month) else {
             return nil
         }
         
-        return getDaysFor(year, month).count
+        guard storage.isMonthExist(forYear: year, month: month) else {
+            return nil
+        }
+        
+        return storage.getDaysFor(forYear: year, month: month).count
+        
     }
+    
     
     func createMonth (forYear year: Year, month: Month) -> Result<AppReport,AppError> {
         guard DateValidation.isValidDate(forYear: year, month: month) else {
             return .failure(.wrongInput)
         }
         
-        guard !isMonthExist(forYear: year, month: month) else {
+        guard !storage.isMonthExist(forYear: year, month: month) else {
             return .failure(.duplicateDetected)
         }
         
         let lastDay = DateValidation.maxDays(year, month)
         
+        var daysToSave = [WorkDay]()
         for day in 1...lastDay {
-            workDaysByMonth.append(WorkDay(day: day, month: month, year: year, bonus: nil, isMyShift: false))
+            daysToSave.append(WorkDay(day: day, month: month, year: year, bonus: nil, isMyShift: false))
         }
         
-        
-        sortDays()
+        storage.save(monthDays: daysToSave, year: year, month: month)
         return .success(.createMonth(.init(daysCount: lastDay, month: month, year: year)))
         
     }
@@ -423,7 +453,7 @@ class SalaryManager {
             return []
         }
         
-        let monthDays = getDaysFor(year, month  )
+        let monthDays = storage.getDaysFor(forYear: year, month: month)
         let myShifts = monthDays.filter {$0.isMyShift}
         return myShifts.map {$0.day}
     }
@@ -437,7 +467,7 @@ class SalaryManager {
             return .failure(AppError.emptyInput)
         }
         
-        guard isMonthExist(forYear: year, month: month) else {
+        guard storage.isMonthExist(forYear: year, month: month) else {
             return .failure(AppError.emptyMonth)
         }
         
@@ -446,10 +476,11 @@ class SalaryManager {
         var problems : [Int] = []
         var operationStatus = OperationStatus.warning
         
+        var currentMonth = storage.getDaysFor(forYear: year, month: month)
         for day in days {
             
-            if let index = getIndexFor(year, month, day) {
-                workDaysByMonth[index].isMyShift = mode.isWorking
+            if let index = currentMonth.firstIndex(where: {$0.day == day}) {
+                currentMonth[index].isMyShift = mode.isWorking
                 addCount += 1
             } else {
                 problems.append(day)
@@ -461,7 +492,7 @@ class SalaryManager {
         }
         
         let mySifts = shiftsGetDays(forYear: year, month: month)
-        
+        storage.save(monthDays: currentMonth, year: year, month: month)
         return .success(.addDays(AddDaysReport(requested, addCount, problems, operationStatus, mySifts)))
     }
     
@@ -471,10 +502,10 @@ class SalaryManager {
             return .failure(.wrongInput)
         }
         
-        let tempCount = workDaysByMonth.count
+        let tempCount = storage.getDaysFor(forYear: year, month: month).count
         
-        workDaysByMonth.removeAll {$0.month == month && $0.year == year}
-        let removedCount = tempCount - workDaysByMonth.count
+        storage.removeMonth(year: year, month: month)
+        let removedCount = DateValidation.maxDays(year, month)
         
         let operationStatus : OperationStatus = removedCount > 0 ? .success : .warning
         
@@ -492,7 +523,7 @@ class SalaryManager {
             return .failure(.wrongInput)
         }
         
-        guard isMonthExist(forYear: year, month: month) else {
+        guard storage.isMonthExist(forYear: year, month: month) else {
             return .failure(.emptyMonth)
         }
         
@@ -508,22 +539,22 @@ class SalaryManager {
         var logs : [BonusResult] = []
         
         
-        
+        var currentMonth = storage.getDaysFor(forYear: year, month: month)
         for (day,bonus) in zip(days, bonuses) {
             
-            if let index = getIndexFor(year, month, day) {
-                let hasValue = workDaysByMonth[index].bonus != nil
+            if let index = currentMonth.firstIndex(where: {$0.day == day}) {
+                let hasValue = currentMonth[index].bonus != nil
                 
                 switch mode {
                 case .onlyAdd:
                     if !hasValue {
-                        workDaysByMonth[index].bonus = bonus
+                        currentMonth[index].bonus = bonus
                         logs.append(BonusResult(day: day, bonus: bonus, overRidden: false))
                     } else {
                         skippedDays.append(day)
                     }
                 case .override:
-                    workDaysByMonth[index].bonus = bonus
+                    currentMonth[index].bonus = bonus
                     logs.append(BonusResult(day: day, bonus: bonus, overRidden: hasValue))
                 }
                 
@@ -531,7 +562,7 @@ class SalaryManager {
                 skippedDays.append(day)
             }
         }
-    
+        storage.save(monthDays: currentMonth, year: year, month: month)
         let status : OperationStatus = skippedDays.isEmpty ? .success : .warning
         let report = UpdateBonusReport(mode: mode, logs: logs, skippedDays: skippedDays, operationStatus: status)
         return .success(.addBonus(report))
@@ -545,7 +576,7 @@ class SalaryManager {
         
         let actualRange = days ?? Array(1...DateValidation.maxDays(year, month))
         
-        let currentDays = getDaysFor(year, month)
+        let currentDays = storage.getDaysFor(forYear: year, month: month)
         let daysToCalculate = currentDays.filter {actualRange.contains($0.day)}
         
         let calculator = SalaryCalculator()
